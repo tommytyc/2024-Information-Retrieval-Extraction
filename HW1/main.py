@@ -1,15 +1,29 @@
 import numpy as np
+import cupy as cp
+import pandas as pd
+import os
+from tqdm import tqdm
+import pickle as pkl
 from collections import Counter
 
 class QASystem:
-    def __init__(self):
+    def __init__(self, filename, k1=1.5, b=0.75):
         self.vocabulary = {}
         self.idf = None
         self.document_vectors = None
         self.documents = None
-        self.k1 = 1.5
-        self.b = 0.75
+        self.k1 = k1
+        self.b = b
         self.avgdl = None
+        self.documents = self.load_documents(filename)
+        self.train()
+
+    def load_documents(self, filename):
+        documents = []
+        df = pd.read_csv(filename)
+        for _, row in df.iterrows():
+            documents.append(row['Document_HTML'])  # Assuming the CSV has a 'content' column
+        return documents
 
     def preprocess(self, text):
         return text.lower().split()
@@ -18,7 +32,7 @@ class QASystem:
         word_set = set()
         for doc in documents:
             word_set.update(doc)
-        self.vocabulary = {word: idx for idx, word in enumerate(sorted(word_set))}
+        self.vocabulary = {word: idx for idx, word in enumerate(word_set)}
 
     def compute_tf(self, document):
         word_counts = Counter(document)
@@ -27,7 +41,7 @@ class QASystem:
     def compute_idf(self, documents):
         N = len(documents)
         idf = {}
-        for word in self.vocabulary:
+        for word in tqdm(self.vocabulary):
             doc_count = sum(1 for doc in documents if word in doc)
             idf[word] = np.log((N - doc_count + 0.5) / (doc_count + 0.5) + 1)
         return idf
@@ -40,11 +54,19 @@ class QASystem:
                 tfidf[idx] = tf_value * idf[word]
         return tfidf
 
-    def train(self, questions, answers):
-        self.documents = [self.preprocess(q + " " + a) for q, a in zip(questions, answers)]
+    def train(self):
+        self.documents = [self.preprocess(doc) for doc in self.documents]
         self.build_vocabulary(self.documents)
-        self.idf = self.compute_idf(self.documents)
-        self.document_vectors = np.array([self.compute_tfidf(self.compute_tf(doc), self.idf) for doc in self.documents])
+        if os.path.exists("/mnt/NAS/yctang/work/IR/HW1/idf.pkl"):
+            with open("/mnt/NAS/yctang/work/IR/HW1/idf.pkl", "rb") as f:
+                self.idf = pkl.load(f)
+                for k, v in tqdm(self.idf.items()):
+                    self.idf[k] = cp.asnumpy(v)
+        else:
+            self.idf = self.compute_idf(self.documents)
+            with open("/mnt/NAS/yctang/work/IR/HW1/idf.pkl", "wb") as f:
+                pkl.dump(self.idf, f)
+        self.document_vectors = np.array([self.compute_tfidf(self.compute_tf(doc), self.idf) for doc in tqdm(self.documents)])
         self.avgdl = np.mean([len(doc) for doc in self.documents])
 
     def bm25_score(self, query, doc_idx):
@@ -67,22 +89,23 @@ class QASystem:
         query_vector = self.compute_tfidf(self.compute_tf(query), self.idf)
         return np.dot(self.document_vectors, query_vector) / (np.linalg.norm(self.document_vectors, axis=1) * np.linalg.norm(query_vector))
 
-    def get_top_answers(self, query, top_k=5):
-        query = self.preprocess(query)
-        bm25_scores = np.array([self.bm25_score(query, i) for i in range(len(self.documents))])
-        vector_scores = self.vector_similarity(query)
-        combined_scores = 0.5 * bm25_scores + 0.5 * vector_scores
+    def get_top_answers(self, queries, top_k=3):
+        queries = [self.preprocess(q) for q in queries]
+        bm25_scores = [np.array([self.bm25_score(q, i) for i in range(len(self.documents))]) for q in queries]
+        vector_scores = np.array([self.vector_similarity(q) for q in queries])
+        combined_scores = 0.5 * np.reshape(bm25_scores, (-1,)) + 0.5 * np.reshape(vector_scores, (-1,))
         top_indices = np.argsort(combined_scores)[-top_k:][::-1]
         return [(self.documents[i], combined_scores[i]) for i in top_indices]
+    
+    def evaluate(self, results):
+        # evaluation metric is recall@3
+        pass
+        
 
-# 使用示例
-questions = ["What is Python?", "How do I install NumPy?", "What is machine learning?"]
-answers = ["Python is a programming language.", "You can install NumPy using pip.", "Machine learning is a subset of AI."]
+if __name__ == "__main__":
+    qa_system = QASystem(filename=("/mnt/NAS/yctang/work/IR/HW1/data/documents_data.csv"))
 
-qa_system = QASystem()
-qa_system.train(questions, answers)
-
-test_query = "How to use Python?"
-results = qa_system.get_top_answers(test_query)
-for doc, score in results:
-    print(f"Score: {score:.4f}, Answer: {' '.join(doc)}")
+    test_query = ["how i.met your mother who is the mother"]
+    results = qa_system.get_top_answers(test_query)
+    for doc, score in results:
+        print(f"Score: {score:.4f}, Answer: {' '.join(doc)[:40]}")
