@@ -93,10 +93,25 @@ class QASystem:
         queries = [self.preprocess(q) for q in queries]
         bm25_scores = [np.array([self.bm25_score(q, i) for i in range(len(self.documents))]) for q in queries]
         vector_scores = np.array([self.vector_similarity(q) for q in queries])
-        combined_scores = 0.5 * np.reshape(bm25_scores, (-1,)) + 0.5 * np.reshape(vector_scores, (-1,))
-        top_indices = np.argsort(combined_scores)[-top_k:][::-1]
-        return [(self.documents[i], combined_scores[i]) for i in top_indices]
+        combined_scores = 0.5 * np.reshape(bm25_scores, (len(queries), -1)) + 0.5 * np.reshape(vector_scores, (len(queries), -1))
+        top_indices = [np.argsort(combined_scores[k])[-top_k:][::-1] for k in range(len(queries))]
+        return [[(i+1, self.documents[i], combined_scores[k][i]) for i in top_indices[k]] for k in range(len(queries))]
     
+    def test(self, filename):
+        df = pd.read_csv(filename)
+        queries = df['Question'].tolist()
+        results = self.get_top_answers(queries)
+        predictions = []
+        for r in results:
+            pred = []
+            for i, _, _ in r:
+                pred.append(str(i))
+            predictions.append(" ".join(pred))
+        df_pred = pd.DataFrame({"answer": predictions})
+        df_pred.index += 1
+        df_pred.index.name = "index"
+        df_pred.to_csv("predictions.csv", index=True)
+
     def evaluate(self, results):
         # evaluation metric is recall@3
         pass
@@ -104,8 +119,9 @@ class QASystem:
 
 if __name__ == "__main__":
     qa_system = QASystem(filename=("/mnt/NAS/yctang/work/IR/HW1/data/documents_data.csv"))
-
-    test_query = ["how i.met your mother who is the mother"]
-    results = qa_system.get_top_answers(test_query)
-    for doc, score in results:
-        print(f"Score: {score:.4f}, Answer: {' '.join(doc)[:40]}")
+    qa_system.test(filename="/mnt/NAS/yctang/work/IR/HW1/data/test_question.csv")
+    # test_query = ["which is the most common use of opt-in e-mail marketing", "how i.met your mother who is the mother"]
+    # results = qa_system.get_top_answers(test_query)
+    # for r in results:
+    #     for i, doc, score in r:
+    #         print(f"Score: {score:.4f}, Answer: {' '.join(doc)[:40]}")
