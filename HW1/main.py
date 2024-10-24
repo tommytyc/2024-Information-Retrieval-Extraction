@@ -5,9 +5,10 @@ import os
 from tqdm import tqdm
 import pickle as pkl
 from collections import Counter
+import wandb
 
 class QASystem:
-    def __init__(self, filename, k1=1.5, b=0.75):
+    def __init__(self, filename, k1=1.75, b=0.1):
         self.vocabulary = {}
         self.idf = None
         self.document_vectors = None
@@ -97,7 +98,7 @@ class QASystem:
         top_indices = [np.argsort(combined_scores[k])[-top_k:][::-1] for k in range(len(queries))]
         return [[(i+1, self.documents[i], combined_scores[k][i]) for i in top_indices[k]] for k in range(len(queries))]
     
-    def test(self, filename):
+    def test(self, filename, sweep=False):
         df = pd.read_csv(filename)
         queries = df['Question'].tolist()
         results = self.get_top_answers(queries)
@@ -107,19 +108,50 @@ class QASystem:
             for i, _, _ in r:
                 pred.append(str(i))
             predictions.append(" ".join(pred))
-        df_pred = pd.DataFrame({"answer": predictions})
-        df_pred.index += 1
-        df_pred.index.name = "index"
-        df_pred.to_csv("predictions.csv", index=True)
+        if not sweep:
+            df_pred = pd.DataFrame({"answer": predictions})
+            df_pred.index += 1
+            df_pred.index.name = "index"
+            df_pred.to_csv("predictions.csv", index=True)
+        else:
+            answer = df['Answer ID'].tolist()
+            score = self.evaluate(predictions, answer)
+            wandb.log({"recall@3": score})
 
-    def evaluate(self, results):
+    def evaluate(self, predictions, answers):
         # evaluation metric is recall@3
-        pass
-        
+        correct = 0
+        for pred, ans in zip(predictions, answers):
+            p = pred.split()
+            if str(ans) in p:
+                correct += 1
+        return correct / len(answers)
+    
+def sweep_main():
+    wandb.init(project="IR_HW1")
+    qa_system = QASystem(filename=("/mnt/NAS/yctang/work/IR/HW1/data/documents_data.csv"), k1=wandb.config.k1, b=wandb.config.b)
+    qa_system.test(filename="/mnt/NAS/yctang/work/IR/HW1/data/train_question.csv", sweep=True)
+
+def sweep_wandb():
+    wandb.login()
+    sweep_config = {
+        "name": "IR_HW1",
+        "method": "bayes",
+        "metric": {"name": "recall@3", "goal": "maximize"},
+        "parameters": {
+            "k1": {"min": 0.00, "max": 3.00},
+            "b": {"min": 0.00, "max": 1.00}
+        }
+    }
+    sweep_id = wandb.sweep(sweep_config, project="IR_HW1")
+    wandb.agent(sweep_id, function=sweep_main)
+
 
 if __name__ == "__main__":
-    qa_system = QASystem(filename=("/mnt/NAS/yctang/work/IR/HW1/data/documents_data.csv"))
+    # sweep_wandb()
+    qa_system = QASystem(filename=("/mnt/NAS/yctang/work/IR/HW1/data/documents_data.csv"), k1=0.0032726, b=0.37489)
     qa_system.test(filename="/mnt/NAS/yctang/work/IR/HW1/data/test_question.csv")
+    
     # test_query = ["which is the most common use of opt-in e-mail marketing", "how i.met your mother who is the mother"]
     # results = qa_system.get_top_answers(test_query)
     # for r in results:
