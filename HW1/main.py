@@ -8,7 +8,7 @@ from collections import Counter
 import wandb
 
 class QASystem:
-    def __init__(self, filename, k1=1.75, b=0.1):
+    def __init__(self, filename, k1=1.75, b=0.1, bm25_lambda=1):
         self.vocabulary = {}
         self.idf = None
         self.document_vectors = None
@@ -16,6 +16,7 @@ class QASystem:
         self.k1 = k1
         self.b = b
         self.avgdl = None
+        self.bm25_lambda = bm25_lambda
         self.documents = self.load_documents(filename)
         self.train()
 
@@ -94,7 +95,7 @@ class QASystem:
         queries = [self.preprocess(q) for q in queries]
         bm25_scores = [np.array([self.bm25_score(q, i) for i in range(len(self.documents))]) for q in queries]
         vector_scores = np.array([self.vector_similarity(q) for q in queries])
-        combined_scores = 0.5 * np.reshape(bm25_scores, (len(queries), -1)) + 0.5 * np.reshape(vector_scores, (len(queries), -1))
+        combined_scores = self.bm25_lambda * np.reshape(bm25_scores, (len(queries), -1)) + (1-self.bm25_lambda) * np.reshape(vector_scores, (len(queries), -1))
         top_indices = [np.argsort(combined_scores[k])[-top_k:][::-1] for k in range(len(queries))]
         return [[(i+1, self.documents[i], combined_scores[k][i]) for i in top_indices[k]] for k in range(len(queries))]
     
@@ -129,7 +130,7 @@ class QASystem:
     
 def sweep_main():
     wandb.init(project="IR_HW1")
-    qa_system = QASystem(filename=("/mnt/NAS/yctang/work/IR/HW1/data/documents_data.csv"), k1=wandb.config.k1, b=wandb.config.b)
+    qa_system = QASystem(filename=("/mnt/NAS/yctang/work/IR/HW1/data/documents_data_preprocessed.csv"), k1=wandb.config.k1, b=wandb.config.b, bm25_lambda=wandb.config.bm25_lambda)
     qa_system.test(filename="/mnt/NAS/yctang/work/IR/HW1/data/train_question.csv", sweep=True)
 
 def sweep_wandb():
@@ -140,7 +141,8 @@ def sweep_wandb():
         "metric": {"name": "recall@3", "goal": "maximize"},
         "parameters": {
             "k1": {"min": 0.00, "max": 3.00},
-            "b": {"min": 0.00, "max": 1.00}
+            "b": {"min": 0.00, "max": 1.00},
+            "bm25_lambda": {"values": [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]}
         }
     }
     sweep_id = wandb.sweep(sweep_config, project="IR_HW1")
@@ -149,11 +151,5 @@ def sweep_wandb():
 
 if __name__ == "__main__":
     # sweep_wandb()
-    qa_system = QASystem(filename=("/mnt/NAS/yctang/work/IR/HW1/data/documents_data.csv"), k1=0.0032726, b=0.37489)
+    qa_system = QASystem(filename=("/mnt/NAS/yctang/work/IR/HW1/data/documents_data_preprocessed.csv"), k1=0.016294, b=0.61331, bm25_lambda=0.2)
     qa_system.test(filename="/mnt/NAS/yctang/work/IR/HW1/data/test_question.csv")
-    
-    # test_query = ["which is the most common use of opt-in e-mail marketing", "how i.met your mother who is the mother"]
-    # results = qa_system.get_top_answers(test_query)
-    # for r in results:
-    #     for i, doc, score in r:
-    #         print(f"Score: {score:.4f}, Answer: {' '.join(doc)[:40]}")
