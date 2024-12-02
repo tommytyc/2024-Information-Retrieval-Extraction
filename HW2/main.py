@@ -152,6 +152,30 @@ def train(model, train_dataloader, valid_dataloader):
                 torch.save(model.state_dict(), f'model/model_{best_macro_f1}.pth')
     return model
 
+def validate(model_path, dev_dataloader):
+    model = DebertaClassifier()
+    model.load_state_dict(torch.load(model_path))
+    model.to(device)
+    tokenizer = AutoTokenizer.from_pretrained("microsoft/deberta-v3-base")
+    model.eval()
+    cids, labels, preds = [], [], []
+    with torch.no_grad():
+        for data in tqdm(dev_dataloader):
+            cid, premise, claim = data['claim_id'], list(map(list, zip(*data['premise']))), data['claim']
+            input_text = ["[CLS] " + "\n".join(p) + " [SEP] " + c + " [SEP]" for p, c in zip(premise, claim)]
+            input_text = tokenizer(input_text, padding=True, truncation=True, max_length=MAX_SEQ_LEN, return_tensors='pt').to(device)
+            logits, _ = model(input_text)
+            pred = torch.argmax(F.softmax(logits.cpu(), dim=1), 1)
+            label = data['label']
+            labels.append(label.item())
+            preds.append(pred.detach().cpu().numpy()[0])
+            cids.append(cid.item())
+    macro_f1 = compute_metric(labels, preds)
+    print(macro_f1)
+    for index, (l, p) in enumerate(zip(labels, preds)):
+        if l != p:
+            print(cids[index], l, p)
+
 def test(model_path, test_dataloader):
     model = DebertaClassifier()
     model.load_state_dict(torch.load(model_path))
@@ -177,5 +201,6 @@ if __name__ == "__main__":
     train_loader, dev_loader = prepare_train_valid_data('data/train_data.json', 'data/valid_data.json', BATCH_SIZE)
     model = DebertaClassifier()
     model = train(model, train_loader, dev_loader)
+    # validate('model/model_0.5519.pth', dev_loader)
     # test_loader = prepare_test_data('data/test_data.json')
     # test('model/model_0.5519.pth', test_loader)

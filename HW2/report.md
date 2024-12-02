@@ -28,3 +28,15 @@ author: Yu-Chien Tang
     ```
 
 ### Do error analysis or case study. Is there anything worth mentioning while checking the mispredicted data? Share with us. Anytime you try to make a conclusion about the data or model, you should provide concrete data example.
+#### Case: claim_id `29071`
+> St Austin University North Carolina says eating vaginal fluid makes you immune to cancer
+- Top-3 similar premise
+    - . Eating vaginal fluids makes you immune to cancer, and other
+    - Eating vaginal fluids makes you immune to cancer, and other diseases.
+    - Eating vaginal fluids makes you immune to cancer, and other diseases.
+- Results
+    - Prediction: `Partial True`
+    - Label:      `False`  
+- Analysis
+    - The retrieval results show that the embedding model can effectively find premise sentences relevant to the claim. However, the top-3 retrieval results do not support the fact about `St Austin University` and only show sentences relevant to the claim that `Eating vaginal fluids can immune to cancer`.
+    - I hypothesize that the model learns to predict `Partial True` when it can only detect partial facts, as demonstrated in the example above. However, to successfully predict the actual label `False`, we need to include more premise sentences in this example. This indicates a future exploration direction: either including more premise sentences during training or leveraging LLMs to retrieve other sentences that may not appear similar to the claim but can actually help the model discern the facts.
